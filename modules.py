@@ -6,6 +6,9 @@ import numpy as np
 from pyatmos import coesa76 as atmos
 # Thermodynamic Properties
 import CoolProp.CoolProp as cp
+# Averaging
+import statistics as stat
+
 
 
 
