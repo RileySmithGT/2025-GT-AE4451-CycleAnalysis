@@ -2,9 +2,6 @@
 import modules
 
 # ------------------ Functions ------------------#
-# Calculate conditions at the inlet of the compressor
-
-
 def compressor_inlet(gamma, mach, altitude):
     """
     Calculate the conditions at the inlet of the compressor
@@ -20,25 +17,29 @@ def compressor_inlet(gamma, mach, altitude):
             P_01 (float): Ambient pressure at the inlet
             T_02 (float): Compressor inlet temperature
             P_02 (float): Compressor inlet pressure
-            atmos_con: Atmospheric conditions object
     """
-    # Get atmospheric conditions at given altitude in km
     atmos_con = modules.atmos(altitude)
-
+    if mach == 0:
+        T_01 = 288.15
+        P_01 = atmos_con.P[0]
+    else:
+        # Get atmospheric conditions at given altitude in km
+        T_01 = atmos_con.T[0]
+        P_01 = atmos_con.P[0]
+        
     # calculate compressor inlet temperature
-    T_02 = atmos_con.T[0] * (1 + ((gamma - 1)/2 * mach ** 2))
+    T_02 = T_01 * (1 + ((gamma - 1)/2 * mach ** 2))
 
     # assumption, want this to be calculated eventually, maybe can do iteration similar to comp_outlet
     diffuser_eff = 0.97
 
     # calculate compressor inlet pressure
-    P_02 = atmos_con.P[0] * (1 + (diffuser_eff * (T_02 / atmos_con.T[0] - 1))) ** (gamma/(gamma - 1))
+    P_02 = P_01 * (1 + (diffuser_eff * (T_02 / T_01 - 1))) ** (gamma/(gamma - 1))
 
     # Compressor Inlet Temperature, Pressure and Atmospheric conditions
-    return atmos_con.T[0], atmos_con.P[0], T_02, P_02, atmos_con
+    return T_01, P_01, T_02, P_02
 
-# Calculate conditions at the outlet of the compressor
-def compressor_outlet(pressure_ratio, P_02, T_02, atmos_con, gamma):
+def compressor_outlet(pressure_ratio, P_02, T_02, gamma, T_01, P_01):
     """
     Calculate the conditions at the outlet of the compressor
 
@@ -46,8 +47,9 @@ def compressor_outlet(pressure_ratio, P_02, T_02, atmos_con, gamma):
         pressure_ratio (float): Compressor pressure ratio
         P_02 (float): Compressor inlet pressure
         T_02 (float): Compressor inlet temperature
-        atmos_con: Atmospheric conditions object
         gamma (float): Specific heat ratio of the air
+        T_01 (float): Ambient temperature at the inlet
+        P_01 (float): Ambient pressure at the inlet
 
     Returns:
         tuple: Contains:
@@ -58,8 +60,11 @@ def compressor_outlet(pressure_ratio, P_02, T_02, atmos_con, gamma):
     # obtain compressor outlet pressure
     P_03 = pressure_ratio * P_02
 
-    # adiabatic compressor efficiency
-    adiabatic_comp_eff = ((P_02 / atmos_con.P[0]) ** ((gamma - 1) / gamma) - 1)/((T_02 / atmos_con.T[0] )- 1)
+    if T_02 == T_01:
+        adiabatic_comp_eff = 1
+    else:
+        # adiabatic compressor efficiency
+        adiabatic_comp_eff = ((P_02 / P_01) ** ((gamma - 1) / gamma) - 1)/((T_02 / T_01 ) - 1)
 
     # specific heat ratio for the compression process
     max_iter = 50
@@ -90,7 +95,6 @@ def compressor_outlet(pressure_ratio, P_02, T_02, atmos_con, gamma):
     # Compressor outlet Temperature, Pressure, Specific Heat Constant Pressure
     return T_03, P_03, Cp
 
-# Calculate fuel to air ratio
 def fuel_to_air_ratio(T_04, T_03, Q_R, P_03, Cp):
     """
     Calculate the fuel-to-air ratio for the engine
@@ -111,7 +115,6 @@ def fuel_to_air_ratio(T_04, T_03, Q_R, P_03, Cp):
     # fuel to air combustion ratio
     return fuel_air_ratio
 
-# Calculate conditions at the turbine outlet
 def turbine_outlet(T_04, T_03, T_02, P_04, gamma):
     """
     Calculate the turbine outlet conditions
@@ -121,6 +124,7 @@ def turbine_outlet(T_04, T_03, T_02, P_04, gamma):
         T_03 (float): Compressor outlet temperature
         T_02 (float): Compressor inlet temperature
         P_04 (float): Compressor outlet pressure
+        gamma (float): Specific heat ratio of the air
 
     Returns:
         tuple: Contains:
@@ -157,12 +161,11 @@ def turbine_outlet(T_04, T_03, T_02, P_04, gamma):
             gamma_t = gamma_t_new
             break
         gamma_t = gamma_t_new
-
+        
     # Nozzle inlet Temperature and Pressure
     return T_05, P_05
 
-# calculate the nozzle velocity
-def nozzle_velocity(T_06, P_06, R, atmos_con):
+def nozzle_velocity(T_06, P_06, R, P_01):
     """
     Calculate the nozzle exit velocity
 
@@ -170,7 +173,7 @@ def nozzle_velocity(T_06, P_06, R, atmos_con):
         T_06 (float): Nozzle exit temperature
         P_06 (float): Nozzle exit pressure
         R (float): Specific gas constant for air
-        atmos_con: Atmospheric conditions object (provides ambient pressure, etc)
+        P_01 (float): Ambient pressure at the inlet
 
     Returns:
         float: Nozzle exit velocity in m/s
@@ -180,13 +183,11 @@ def nozzle_velocity(T_06, P_06, R, atmos_con):
 
     nozzle_adiabatic_eff = 0.98
     # exhaust gas exit velocity
-    exit_velocity = (2 * nozzle_adiabatic_eff * ((gamma_n / (gamma_n - 1))) * R * 
-                     T_06 * (1 - (atmos_con.P[0] / P_06) ** ((gamma_n - 1)/ gamma_n))) ** 0.5
+    exit_velocity = (2 * nozzle_adiabatic_eff * ((gamma_n / (gamma_n - 1))) * R * T_06 * (1 - (P_01 / P_06) ** ((gamma_n - 1)/ gamma_n))) ** 0.5
 
     # gas exhaust exit velocity
     return exit_velocity
 
-# calculate flow rates
 def flow_rates(T_05, P_05, mach, T_01, P_01, R, gamma, exit_velocity, area_inlet, area_exit, fuel_air_ratio):
     """
     Calculate the mass flow rates through the engine
@@ -217,17 +218,20 @@ def flow_rates(T_05, P_05, mach, T_01, P_01, R, gamma, exit_velocity, area_inlet
 
     # calculate vehicle speed in terms of m/s
     a = (gamma * R * T_01) ** 0.5
-    inlet_velocity = a * mach
-
+    
     # calculate fuel flow rate in kg/s
-    mass_fuel_flow_rate = rho_e * exit_velocity * area_exit - rho * inlet_velocity * area_inlet
+    if mach == 0:
+        inlet_velocity = 50 # m/s, this is typical for a static turbojet engine produced by the compressor
+    else: 
+        inlet_velocity = a * mach
+
     mass_air_flow_rate = rho * inlet_velocity * area_inlet
+    mass_fuel_flow_rate = mass_air_flow_rate * fuel_air_ratio
     mass_exit_flow_rate = mass_fuel_flow_rate + mass_air_flow_rate
 
     return mass_fuel_flow_rate, mass_air_flow_rate, mass_exit_flow_rate, inlet_velocity
 
-# calculate thrust produced
-def thrust(mass_air_flow_rate, fuel_air_ratio, exit_velocity, inlet_velocity, P_05, P_01, area_exit):
+def thrust(mass_air_flow_rate, fuel_air_ratio, exit_velocity, inlet_velocity, P_05, P_01, area_exit, mass_fuel_flow_rate, Q_R, mach):
     """
     Calculate the thrust produced by the engine
 
@@ -239,17 +243,24 @@ def thrust(mass_air_flow_rate, fuel_air_ratio, exit_velocity, inlet_velocity, P_
         P_05 (float): Pressure at the nozzle exit
         P_01 (float): Ambient pressure at the inlet
         area_exit (float): Nozzle exit area (m²)
+        thermal_efficiency (float): Thermal efficiency
+        mass_fuel_flow_rate (float): Fuel mass flow rate (kg/s)
+        Q_R (float): Specific energy release of the fuel (J/kg)
+        mach (float): Mach number
 
     Returns:
         float: Thrust produced (N)
     """
-    # calculate thrust using conservation of momentum
-    thrust_val = mass_air_flow_rate * ((1 + fuel_air_ratio) * exit_velocity - inlet_velocity) + (P_05 - P_01) * area_exit
+    if mach == 0:
+        thermal_efficiency = ((1 + fuel_air_ratio) * (exit_velocity ** 2 / 2) - (inlet_velocity ** 2 / 2)) / (fuel_air_ratio * Q_R)
+        thrust_val = 2 * thermal_efficiency * Q_R * mass_fuel_flow_rate / exit_velocity
+    else: 
+        # calculate thrust using conservation of momentum
+        thrust_val = mass_air_flow_rate * ((1 + fuel_air_ratio) * exit_velocity - inlet_velocity) + (P_05 - P_01) * area_exit
 
     return thrust_val
 
-# calculate efficiency of the engine
-def efficiencies(thrust, inlet_velocity, exit_velocity, fuel_air_ratio, mass_fuel_flow_rate, mass_air_flow_rate, Q_R):
+def efficiencies(thrust, inlet_velocity, exit_velocity, fuel_air_ratio, mass_fuel_flow_rate, mass_air_flow_rate, Q_R, mach):  
     """
     Calculate the engine efficiencies and thrust specific fuel consumption (TSFC)
 
@@ -261,6 +272,7 @@ def efficiencies(thrust, inlet_velocity, exit_velocity, fuel_air_ratio, mass_fue
         mass_fuel_flow_rate (float): Fuel mass flow rate (kg/s)
         mass_air_flow_rate (float): Air mass flow rate (kg/s)
         Q_R (float): Specific energy release of the fuel (J/kg)
+        mach (float): Mach number
 
     Returns:
         tuple: Contains:
@@ -271,7 +283,10 @@ def efficiencies(thrust, inlet_velocity, exit_velocity, fuel_air_ratio, mass_fue
     """
     # Engine efficiency properties
     thermal_efficiency = ((1 + fuel_air_ratio) * (exit_velocity ** 2 / 2) - (inlet_velocity ** 2 / 2)) / (fuel_air_ratio * Q_R)
-    prop_efficiency = (thrust * inlet_velocity) / (mass_air_flow_rate * ((1 + fuel_air_ratio) * 
+    if mach == 0:
+        prop_efficiency = 0.4
+    else:
+        prop_efficiency = (thrust * inlet_velocity) / (mass_air_flow_rate * ((1 + fuel_air_ratio) * 
                                                                          (exit_velocity ** 2 / 2) - (inlet_velocity ** 2 / 2)))
     overall_efficiency = thermal_efficiency * prop_efficiency
 
@@ -280,6 +295,8 @@ def efficiencies(thrust, inlet_velocity, exit_velocity, fuel_air_ratio, mass_fue
 
     return thermal_efficiency, prop_efficiency, overall_efficiency, TSFC
 
+def aircraft_range():
+    return 0
 
 # ------------------ Create Lists ------------------#
 T_01 = []
@@ -321,24 +338,27 @@ area_exit = 0.15   # m², typical exhaust/nozzle throat area
 area_ratio = area_exit / area_inlet
 
 # ------------------ User Defined Inputs ------------------#
-mach_minimum = 0.01
+mach_minimum = 0
 mach_step = 0.05
-mach_maximum = int(input("Enter the maximum Mach number: "))
-mach_values = modules.np.arange(mach_minimum, mach_maximum, mach_step).tolist()
+mach_maximum = float(input("Enter the maximum Mach number: "))
+mach_values = modules.np.arange(mach_minimum, mach_maximum + mach_step, mach_step).tolist()
 
-#altitude_minimum = 0
-#altitude_step = 0.5
-#altitude_maximum = int(input("Enter the maximum altitude in km: "))
-altitude = 0  # km
+altitude_minimum = 0
+altitude_maximum = float(input("Enter the maximum altitude in km: "))
+
+if altitude_maximum == 0:
+    altitude_values = [0] * len(mach_values)
+else:
+    altitude_step = altitude_maximum / len(mach_values)
+    altitude_values = modules.np.arange(altitude_minimum, altitude_maximum, altitude_step).tolist()
 
 # ------------------ Loop through Speeds ------------------#
-for mach in mach_values:
+for i in range(len(mach_values)):
     # inputs: gamma, mach number, altitude in km
-    t_01, p_01, t_02, p_02, atmos = compressor_inlet(gamma, mach, altitude)
+    t_01, p_01, t_02, p_02 = compressor_inlet(gamma, mach_values[i], altitude_values[i])
 
     # inputs: pressure ratio (variable), compressor inlet pressure, compressor inlet temperature, atmospheric conditions, gamma
-    t_03, p_03, cp = compressor_outlet(
-        pressure_ratio, p_02, t_02, atmos, gamma)
+    t_03, p_03, cp = compressor_outlet(pressure_ratio, p_02, t_02, gamma, t_01, p_01)
 
     # inputs: maximum temperature, compressor outlet temperature, specific energy release of the fuel, compressor outlet pressure, specific heat
     f_a_ratio = fuel_to_air_ratio(max_TJ_temp, t_03, Q_R, p_03, cp)
@@ -347,30 +367,28 @@ for mach in mach_values:
     t_05, p_05 = turbine_outlet(max_TJ_temp, t_03, t_02, p_03, gamma)
 
     # inputs: nozzle exit temperature, nozzle exit pressure, specific gas constant for air
-    v_e = nozzle_velocity(t_05, p_05, R, atmos)
+    v_e = nozzle_velocity(t_05, p_05, R, p_01)
 
     # inputs: nozzle exit temperature, nozzle exit pressure, mach number, ambient temperature, ambient pressure, specific gas constant, gamma
     #         nozzle exit velocity, inlet area, exhaust area, fuel to air ratio
     mass_f_f_r, mass_a_f_r, mass_e_f_r, v_i = flow_rates(
-        t_05, p_05, mach, t_01, p_01, R, gamma, v_e, area_inlet, area_exit, f_a_ratio)
+        t_05, p_05, mach_values[i], t_01, p_01, R, gamma, v_e, area_inlet, area_exit, f_a_ratio)
 
     # inputs: air mass flow rate, fuel to air ratio, nozzle exit velocity, inlet velocity, nozzle exit pressure, ambient pressure, nozzle area
-    thrust_val = thrust(mass_a_f_r, f_a_ratio, v_e,
-                        v_i, p_05, p_01, area_exit)
+    thrust_val = thrust(mass_a_f_r, f_a_ratio, v_e, v_i, p_05, p_01, area_exit, mass_f_f_r, Q_R, mach_values[i])
 
     # inputs: thrust, inlet velocity, exhaust velocity, fuel to air ratio, fuel mass flow rate, air mass flow rate, specific energy release of the fuel
-    n_th, n_p, n_o, TSFC_val = efficiencies(thrust_val, v_i, v_e, f_a_ratio, mass_f_f_r, mass_a_f_r, Q_R)
+    n_th, n_p, n_o, TSFC_val = efficiencies(thrust_val, v_i, v_e, f_a_ratio, mass_f_f_r, mass_a_f_r, Q_R, mach_values[i])
 
     # Append values to lists
     T_01.append(t_01)
     P_01.append(p_01)
     T_02.append(t_02)
     P_02.append(p_02)
-    atmos_con_list.append(atmos)
     T_03.append(t_03)
     P_03.append(p_03)
     Cp.append(cp)
-    fuel_air_ratio = f_a_ratio
+    fuel_air_ratio.append(f_a_ratio)
     T_05.append(t_05)
     P_05.append(p_05)
     exit_velocity.append(v_e)
@@ -397,6 +415,9 @@ specific_volumes = [R * T / P for T, P in zip(temperatures, pressure)]
 entropies = [modules.cp.PropsSI('S', 'T', T, 'P', P, 'Air')
              for T, P in zip(temperatures, pressure)]
 
+pressure_kpa = [P / 1000 for P in pressure]
+thrust_array = modules.np.array(thrust_list)
+
 # ------------------ Plotting ------------------#
 modules.plt.figure()
 modules.plt.plot(entropies, temperatures)
@@ -407,12 +428,24 @@ modules.plt.ylabel('Temperature (K)')
 modules.plt.title('T-S Diagram')
 
 modules.plt.figure()
-modules.plt.plot(specific_volumes, pressure)
-modules.plt.plot([specific_volumes[0], specific_volumes[-1]], [pressure[0], pressure[-1]],  # Connect start and end
+modules.plt.plot(specific_volumes, pressure_kpa)
+modules.plt.plot([specific_volumes[0], specific_volumes[-1]], [pressure_kpa[0], pressure_kpa[-1]],  # Connect start and end
                  ':', color='gray', linewidth=1, label='Start/End Connection')
 modules.plt.xlabel('Specific Volume (m³/kg)')
-modules.plt.ylabel('Pressure (Pa)')
-modules.plt.title('P-v Diagram')
+modules.plt.ylabel('Pressure (kPa)')
+modules.plt.title('P-V Diagram')
+
+modules.plt.figure()
+modules.plt.plot(mach_values, thrust_array)
+modules.plt.xlabel('Mach Number')
+modules.plt.ylabel('Thrust (kN)')
+modules.plt.title('Thrust vs Mach Number')
+
+modules.plt.figure()
+modules.plt.plot(mach_values, overall_efficiency)
+modules.plt.xlabel('Mach Number')
+modules.plt.ylabel('Overall Efficiency')
+modules.plt.title('Overall Efficiency vs Mach Number')
 
 modules.plt.show()
 
@@ -420,5 +453,8 @@ modules.plt.show()
 print(f"The turbojet engine produces {max(thrust_list)/1e3:.2f}kN of Peak Thrust at Mach {mach_values[thrust_list.index(max(thrust_list))]:.3f}")
 print(f"Thermal Efficiency: {modules.stat.mean(thermal_efficiency):.3f} \nPropulsive Efficiency: {modules.stat.mean(prop_efficiency):.3f} \
       \nOverall Efficiency: {modules.stat.mean(overall_efficiency):.3f}")
+print(f"Peak Overall Efficiency: {max(overall_efficiency):.3f} at Mach {mach_values[overall_efficiency.index(max(overall_efficiency))]:.3f}")
 print(f"The engine consumes, on average, {modules.stat.mean(mass_fuel_flow_rate):.4f} kg of fuel per second")
 print(f"Thrust Specific Fuel Consumption: {modules.stat.mean(TSFC_list):.4f} kg/N·hr")
+print(f"At 0 Mach, the engine produces {thrust_list[0]/1e3:.2f}kN of Peak Thrust")
+
