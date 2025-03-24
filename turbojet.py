@@ -221,7 +221,7 @@ def flow_rates(T_05, P_05, mach, T_01, P_01, R, gamma, exit_velocity, area_inlet
     
     # calculate fuel flow rate in kg/s
     if mach == 0:
-        inlet_velocity = 50 # m/s, this is typical for a static turbojet engine produced by the compressor
+        inlet_velocity = 55 # m/s, assuming catapult takeoff, aircraft carrier etc.
     else: 
         inlet_velocity = a * mach
 
@@ -295,8 +295,51 @@ def efficiencies(thrust, inlet_velocity, exit_velocity, fuel_air_ratio, mass_fue
 
     return thermal_efficiency, prop_efficiency, overall_efficiency, TSFC
 
-def aircraft_range():
-    return 0
+def aircraft_range(n_o, C_L, C_D, wet_mass, dry_mass, Q_R, thrust, mass_fuel_flow_rate, mach, T_01, P_01, wing_area):
+    """
+    Calculate the range of the aircraft
+    
+    Parameters:
+        n_o (float): Overall efficiency
+        C_L (float): Lift coefficient
+        C_D (float): Drag coefficient
+        wet_mass (float): Wet mass of the aircraft
+        dry_mass (float): Dry mass of the aircraft
+        Q_R (float): Specific energy release of the fuel (J/kg)
+        thrust (float): Engine thrust (N)
+        mass_fuel_flow_rate (float): Fuel mass flow rate (kg/s)
+        mach (float): Mach number
+        T_01 (float): Ambient temperature at the inlet
+        P_01 (float): Ambient pressure at the inlet
+        wing_area (float): Wing area (m²)
+    
+    Returns:
+        float: Range of the aircraft
+    """
+    if mach == 0:
+        u = 55 # m/s, assuming catapult takeoff, aircraft carrier etc.
+    else: 
+        u = mach * modules.CP.PropsSI('A', 'T', T_01, 'P', P_01, 'air')
+    
+    rho = modules.CP.PropsSI('D', 'T', T_01, 'P', P_01, 'air')
+
+    
+    lift = 0.5 * C_L * rho * u ** 2 * wing_area
+    drag = 0.5 * C_D * rho * u ** 2 * wing_area
+
+    range_1 = n_0 * (lift / drag) * modules.np.log(wet_mass / dry_mass) * (Q_R / (9.81))
+    range_2 = (lift / drag) * modules.np.log(wet_mass / dry_mass) * (thrust / mass_fuel_flow_rate) * (u / 9.81)
+    
+    if range_1 != range_2:
+        print("Warning: The two methods for calculating range are not equal.")
+        print(f"Range Method 1: {range_1} km")
+        print(f"Range Method 2: {range_2} km")
+    else: 
+        print(f"Range: {range_1} km")
+        
+    return range_1, range_2
+    
+    
 
 # ------------------ Create Lists ------------------#
 T_01 = []
@@ -334,8 +377,12 @@ Q_R = 48E6  # J/kg, C10 H22
 R = 287  # J / (kg * K)
 area_inlet = 0.4    # m², typical turbojet inlet area
 area_exit = 0.15   # m², typical exhaust/nozzle throat area
-# approximately 0.2857, want to optimise this
-area_ratio = area_exit / area_inlet
+area_ratio = area_exit / area_inlet # approximately 0.2857, want to optimise this
+# Based on F14-A
+C_L = 1.5  # Lift Coefficient, for now
+C_D = 0.016  # Drag Coefficient, for now
+wing_area = 52.5 # m², for now
+
 
 # ------------------ User Defined Inputs ------------------#
 mach_minimum = 0
@@ -343,7 +390,7 @@ mach_step = 0.05
 mach_maximum = float(input("Enter the maximum Mach number: "))
 mach_values = modules.np.arange(mach_minimum, mach_maximum + mach_step, mach_step).tolist()
 
-altitude_minimum = 0
+altitude_minimum = 0.0183 # Height of aircraft carrier runway
 altitude_maximum = float(input("Enter the maximum altitude in km: "))
 
 if altitude_maximum == 0:
@@ -371,14 +418,16 @@ for i in range(len(mach_values)):
 
     # inputs: nozzle exit temperature, nozzle exit pressure, mach number, ambient temperature, ambient pressure, specific gas constant, gamma
     #         nozzle exit velocity, inlet area, exhaust area, fuel to air ratio
-    mass_f_f_r, mass_a_f_r, mass_e_f_r, v_i = flow_rates(
-        t_05, p_05, mach_values[i], t_01, p_01, R, gamma, v_e, area_inlet, area_exit, f_a_ratio)
+    mass_f_f_r, mass_a_f_r, mass_e_f_r, v_i = flow_rates(t_05, p_05, mach_values[i], t_01, p_01, R, gamma, v_e, area_inlet, area_exit, f_a_ratio)
 
     # inputs: air mass flow rate, fuel to air ratio, nozzle exit velocity, inlet velocity, nozzle exit pressure, ambient pressure, nozzle area
     thrust_val = thrust(mass_a_f_r, f_a_ratio, v_e, v_i, p_05, p_01, area_exit, mass_f_f_r, Q_R, mach_values[i])
 
     # inputs: thrust, inlet velocity, exhaust velocity, fuel to air ratio, fuel mass flow rate, air mass flow rate, specific energy release of the fuel
     n_th, n_p, n_o, TSFC_val = efficiencies(thrust_val, v_i, v_e, f_a_ratio, mass_f_f_r, mass_a_f_r, Q_R, mach_values[i])
+    
+    # 
+    range_1, range_2 = aircraft_range(n_o, C_L, C_D, engine_TJ_mass, engine_TJ_massm, mass_f_f_r, Q_R, thrust_val, mass_f_f_r, mach    
 
     # Append values to lists
     T_01.append(t_01)
@@ -442,10 +491,10 @@ modules.plt.ylabel('Thrust (kN)')
 modules.plt.title('Thrust vs Mach Number')
 
 modules.plt.figure()
-modules.plt.plot(mach_values, overall_efficiency)
-modules.plt.xlabel('Mach Number')
-modules.plt.ylabel('Overall Efficiency')
-modules.plt.title('Overall Efficiency vs Mach Number')
+modules.plt.plot(altitude_values, thrust_array)
+modules.plt.xlabel('Altitude (km)')
+modules.plt.ylabel('Thrust (kN)')
+modules.plt.title('Thrust vs Altitude')
 
 modules.plt.show()
 
